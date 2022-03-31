@@ -3,7 +3,7 @@ from pyquaternion import Quaternion
 import math
 import pandas as pd
 import matplotlib.pyplot as pp
-import skvideo.io
+#import skvideo.io
 import os
 import pickle
 from copy import deepcopy
@@ -82,8 +82,13 @@ def create_symmetric_matrix(vec):
     return matrix + matrix.T - np.diag(matrix.diagonal())
 
 
-def array_to_string(array):
-    return ' '.join(['%8g' % num for num in array])
+def array_to_string(array, abs_thr=-1):
+    """Transforms a numerical array into a string representation.
+
+    Elements of array with absolute values less than abs_thr are replaces with 0. Suggested value:
+    10 * sys.float_info.epsilon
+    """
+    return ' '.join(['{:8g}'.format(num if abs(num) > abs_thr else 0) for num in array])
 
 
 def create_transformation_matrix(pos=None, quat=None, R=None):

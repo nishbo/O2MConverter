@@ -19,6 +19,10 @@ from sklearn.metrics import r2_score
 import Utils
 
 
+# less than this is zero
+EPSILON = 10 * sys.float_info.epsilon
+
+
 class Converter4:
     """A class to convert OpenSim 4.0 XML model files to MuJoCo XML model files"""
     def __init__(self):
@@ -27,6 +31,7 @@ class Converter4:
         self.output_folder = None
 
         self.reset()
+        self.reset_mujoco_defaults()
 
         # Use mesh files if they are given
         self.geometry_folder = None
@@ -60,6 +65,66 @@ class Converter4:
         # The root of the kinematic tree
         self.origin_body = None
         self.origin_joint = None
+
+    def reset_mujoco_defaults(self):
+        # Set MuJoCo model defaults
+        # Note: balanceinertia is set to true, and boundmass and boundinertia are > 0 to ignore
+        # poorly designed models (that contain incorrect inertial properties or massless moving
+        # bodies)
+        self.model_mujoco_compiler = {
+            "@inertiafromgeom": "auto",
+            "@angle": "radian",
+            "@balanceinertia": "true",
+            "@boundmass": "0.001",
+            "@boundinertia": "0.001",
+            "lengthrange": {"@inttotal": "500"}
+        }
+        self.model_mujoco_default = {
+            "joint": {
+                "@limited": "true",
+                "@damping": "0.5",
+                "@armature": "0.01",
+                "@stiffness": "0"},
+            "geom": {
+                "@contype": "1", "@conaffinity": "1", "@condim": "3",
+                "@rgba": "0.8 0.6 .4 1",
+                "@margin": "0.001",
+                "@solref": ".02 1", "@solimp": ".8 .8 .01",
+                "@material": "geom"},
+            "site": {"@size": "0.001"},
+            "tendon": {"@width": "0.001", "@rgba": ".95 .3 .3 1", "@limited": "false"}}
+        self.model_mujoco_default_default = [
+            {"@class": "muscle",
+             "muscle": {"@ctrllimited": "true", "@ctrlrange": "0 1", "@scale": "400"}},
+            {"@class": "motor",
+             "motor": {"@gear": "20"}}
+        ]
+        self.model_mujoco_option = {"@timestep": "0.002", "flag": {"@energy": "enable"}}
+        self.model_mujoco_size = {"@njmax": "1000", "@nconmax": "400", "@nuser_jnt": 1}
+        self.model_mujoco_visual = {
+            "map": {"@fogstart": "3", "@fogend": "5", "@force": "0.1"},
+            "quality": {"@shadowsize": "2048"}}
+
+        # Start building the worldbody
+        self.model_mujoco_worldbody = {"geom": {
+            "@name": "floor", "@pos": "0 0 0", "@size": "10 10 0.125",
+            "@type": "plane", "@material": "MatPlane", "@condim": "3"}}
+        self.model_mujoco_worldbody_body = {
+            "light": {"@mode": "trackcom", "@directional": "false", "@diffuse": ".8 .8 .8",
+                      "@specular": "0.3 0.3 0.3", "@pos": "0 0 4.0", "@dir": "0 0 -1"}}
+
+        # Set some asset defaults
+        self.model_mujoco_asset_texture = [
+            {"@name": "texplane", "@type": "2d", "@builtin": "checker", "@rgb1": ".2 .3 .4",
+             "@rgb2": ".1 0.15 0.2", "@width": "100", "@height": "100"},
+            {"@name": "texgeom", "@type": "cube", "@builtin": "flat", "@mark": "cross",
+             "@width": "127", "@height": "1278", "@rgb1": "0.8 0.6 0.4", "@rgb2": "0.8 0.6 0.4",
+             "@markrgb": "1 1 1", "@random": "0.01"}]
+
+        self.model_mujoco_asset_material = [
+            {"@name": "MatPlane", "@reflectance": "0.5", "@texture": "texplane",
+             "@texrepeat": "1 1", "@texuniform": "true"},
+            {"@name": "geom", "@texture": "texgeom", "@texuniform": "true"}]
 
     def convert(self, input_xml, output_folder, geometry_folder=None, for_testing=False):
         """Convert given OpenSim XML model to MuJoCo XML model"""
@@ -120,11 +185,11 @@ class Converter4:
 
         # If we're building this model for testing we need to disable collisions, add a camera for
         # recording, and remove the floor
-        mujoco_model["mujoco"]["worldbody"]["camera"] = {
-            "@name": "for_testing",
-            "@pos": "0 0 0",
-            "@euler": "0 0 0"}
         if for_testing:
+            mujoco_model["mujoco"]["worldbody"]["camera"] = {
+                "@name": "for_testing",
+                "@pos": "0 0 0",
+                "@euler": "0 0 0"}
             mujoco_model["mujoco"]["option"]["@collision"] = "predefined"
             del mujoco_model["mujoco"]["worldbody"]["geom"]
 
@@ -137,7 +202,11 @@ class Converter4:
 
         # We might need to fix stl files (if converted from OpenSim Geometry vtk files)
         if self.geometry_folder is not None:
-            self.fix_stl_files()
+            try:
+                import admesh
+                self.fix_stl_files()
+            except ModuleNotFoundError as e:
+                warnings.warn('Could not import admesh. Not fixing STL files.')
 
     def parse_constraints(self, p):
         print('Parsing constraints...')
@@ -170,8 +239,7 @@ class Converter4:
                     if len(x_values) <= 1 or len(y_values) <= 1:
                         raise ValueError("Not enough points, can't fit a spline")
 
-                    # TODO(AS) remove the senior coefficients with negligible amplitudes.\
-                    # TODO(AS) here and in Joint: make a generalized optimization function
+                    # TODO here and in Joint: make a generalized fit function
 
                     # Fit a linear / quadratic / cubic / quartic function
                     fit = np.polynomial.polynomial.Polynomial.fit(
@@ -200,12 +268,13 @@ class Converter4:
                     raise NotImplementedError
 
                 # Create a constraint
+                # joint1 depends on joint2
                 self.equality["joint"].append({
                     "@name": constraint["@name"],
                     "@joint1": constraint["dependent_coordinate_name"],
                     "@joint2": constraint["independent_coordinate_names"],
                     "@active": "true" if constraint["isEnforced"] == "true" else "false",
-                    "@polycoef": Utils.array_to_string(polycoef),
+                    "@polycoef": Utils.array_to_string(polycoef, abs_thr=EPSILON),
                     "@solimp": "0.9999 0.9999 0.001 0.5 2"})
         print('Done.')
 
@@ -395,45 +464,15 @@ class Converter4:
         model = {"mujoco": {"@model": model_name}}
 
         # Set defaults
-        # Note: balanceinertia is set to true, and boundmass and boundinertia are > 0 to ignore
-        # poorly designed models (that contain incorrect inertial properties or massless moving
-        # bodies)
-        model["mujoco"]["compiler"] = {
-            "@inertiafromgeom": "auto",
-            "@angle": "radian",
-            "@balanceinertia": "true",
-            "@boundmass": "0.001",
-            "@boundinertia": "0.001",
-            "lengthrange": {"@inttotal": "500"}
-        }
-        model["mujoco"]["default"] = {
-            "joint": {
-                "@limited": "true",
-                "@damping": "0.5",
-                "@armature": "0.01",
-                "@stiffness": "0"},
-            "geom": {
-                "@contype": "1", "@conaffinity": "1", "@condim": "3",
-                "@rgba": "0.8 0.6 .4 1",
-                "@margin": "0.001", "@solref": ".02 1", "@solimp": ".8 .8 .01",
-                "@material": "geom"},
-            "site": {"@size": "0.001"},
-            "tendon": {"@width": "0.001", "@rgba": ".95 .3 .3 1", "@limited": "false"}}
-        model["mujoco"]["default"]["default"] = [
-            {"@class": "muscle", "muscle": {
-                "@ctrllimited": "true", "@ctrlrange": "0 1", "@scale": "400"}},
-            {"@class": "motor", "motor": {"@gear": "20"}}
-        ]
-        model["mujoco"]["option"] = {"@timestep": "0.002", "flag": {"@energy": "enable"}}
-        model["mujoco"]["size"] = {"@njmax": "1000", "@nconmax": "400", "@nuser_jnt": 1}
-        model["mujoco"]["visual"] = {
-            "map": {"@fogstart": "3", "@fogend": "5", "@force": "0.1"},
-            "quality": {"@shadowsize": "2048"}}
+        model["mujoco"]["compiler"] = self.model_mujoco_compiler
+        model["mujoco"]["default"] = self.model_mujoco_default
+        model["mujoco"]["default"]["default"] = self.model_mujoco_default_default
+        model["mujoco"]["option"] = self.model_mujoco_option
+        model["mujoco"]["size"] = self.model_mujoco_size
+        model["mujoco"]["visual"] = self.model_mujoco_visual
 
         # Start building the worldbody
-        worldbody = {"geom": {
-            "@name": "floor", "@pos": "0 0 0", "@size": "10 10 0.125",
-            "@type": "plane", "@material": "MatPlane", "@condim": "3"}}
+        worldbody = self.model_mujoco_worldbody
 
         # We should probably find the "origin" body, where the kinematic chain begins
         self.origin_body, self.origin_joint = self.find_origin()
@@ -450,33 +489,24 @@ class Converter4:
         worldbody["site"] = self.bodies[self.origin_joint.parent_body].sites
 
         # Add some more defaults
-        worldbody["body"] = {
-            "light": {"@mode": "trackcom", "@directional": "false", "@diffuse": ".8 .8 .8",
-                      "@specular": "0.3 0.3 0.3", "@pos": "0 0 4.0", "@dir": "0 0 -1"}}
+        worldbody["body"] = self.model_mujoco_worldbody_body
 
         # Build the kinematic chains
-        worldbody["body"] = self.add_body(worldbody["body"], self.origin_body,
-                                          self.joints[self.origin_body.name])
+        worldbody["body"] = self.add_body(
+            worldbody["body"], self.origin_body, self.joints[self.origin_body.name])
 
         # Add worldbody to the model
         model["mujoco"]["worldbody"] = worldbody
 
         # We might want to use a weld constraint to fix the origin body to worldbody for experiments
-        self.equality["weld"].append({"@name": "origin_to_worldbody",
-                                      "@body1": self.origin_body.name, "@active": "false"})
+        self.equality["weld"].append({
+            "@name": "origin_to_worldbody",
+            "@body1": self.origin_body.name,
+            "@active": "false"})
 
         # Set some asset defaults
-        self.asset["texture"] = [
-            {"@name": "texplane", "@type": "2d", "@builtin": "checker", "@rgb1": ".2 .3 .4",
-             "@rgb2": ".1 0.15 0.2", "@width": "100", "@height": "100"},
-            {"@name": "texgeom", "@type": "cube", "@builtin": "flat", "@mark": "cross",
-             "@width": "127", "@height": "1278", "@rgb1": "0.8 0.6 0.4", "@rgb2": "0.8 0.6 0.4",
-             "@markrgb": "1 1 1", "@random": "0.01"}]
-
-        self.asset["material"] = [
-            {"@name": "MatPlane", "@reflectance": "0.5", "@texture": "texplane",
-             "@texrepeat": "1 1", "@texuniform": "true"},
-            {"@name": "geom", "@texture": "texgeom", "@texuniform": "true"}]
+        self.asset["texture"] = self.model_mujoco_asset_texture
+        self.asset["material"] = self.model_mujoco_asset_material
 
         # Add assets to model
         model["mujoco"]["asset"] = self.asset
@@ -539,12 +569,13 @@ class Converter4:
             np.matmul(joint_to_parent.get_transformation_matrix(), np.linalg.inv(T)))
 
         # Define position and orientation
-        worldbody["@pos"] = Utils.array_to_string(joint_to_parent.location_in_parent)
-        worldbody["@quat"] = "{} {} {} {}".format(
+        worldbody["@pos"] = Utils.array_to_string(joint_to_parent.location_in_parent,
+                                                  abs_thr=EPSILON)
+        worldbody["@quat"] = Utils.array_to_string([
             joint_to_parent.orientation_in_parent.w,
             joint_to_parent.orientation_in_parent.x,
             joint_to_parent.orientation_in_parent.y,
-            joint_to_parent.orientation_in_parent.z)
+            joint_to_parent.orientation_in_parent.z], abs_thr=EPSILON)
 
         # Add geom
         worldbody["geom"] = self.add_geom(current_body)
@@ -566,7 +597,9 @@ class Converter4:
         worldbody["joint"] = []
         for mujoco_joint in joint_to_parent.mujoco_joints:
             # Define the joint
-            j = {"@name": mujoco_joint["name"], "@type": mujoco_joint["type"], "@pos": "0 0 0",
+            j = {"@name": mujoco_joint["name"],
+                 "@type": mujoco_joint["type"],
+                 "@pos": "0 0 0",
                  "@axis": Utils.array_to_string(mujoco_joint["axis"])}
             if "limited" in mujoco_joint:
                 j["@limited"] = "true" if mujoco_joint["limited"] else "false"
@@ -623,49 +656,64 @@ class Converter4:
 
         else:
             # Make sure output geometry folder exists
-            os.makedirs(self.output_folder + self.output_geometry_folder, exist_ok=True)
+            os.makedirs(os.path.join(self.output_folder, self.output_geometry_folder),
+                        exist_ok=True)
 
             # Grab the mesh from given geometry folder
             for m in body.mesh:
-
                 # Get file path
-                geom_file = self.geometry_folder + "/" + m["geometry_file"]
+                geom_file = os.path.join(self.geometry_folder, m["mesh_file"])
 
                 # Check the file exists
                 if not os.path.exists(geom_file) or not os.path.isfile(geom_file):
-                    raise ValueError("Mesh file {} doesn't exist".format(geom_file))
+                    if geom_file[-3:] == "vtp":
+                        if (os.path.exists(geom_file[:-3] + 'stl') and
+                                os.path.isfile(geom_file[:-3] + 'stl')):
+                            warnings.warn('Could not find a VTP file, using found STL file.')
+                            geom_file = geom_file[:-3] + 'stl'
+                        else:
+                            raise ValueError("Neither STL or VTP files {} exist".format(geom_file))
+                    else:
+                        raise ValueError("Mesh file {} doesn't exist".format(geom_file))
 
                 # Transform vtk into stl or just copy stl file
-                mesh_name = m["geometry_file"][:-4]
-                stl_file = self.output_geometry_folder + mesh_name + ".stl"
+                mesh_name = m["mesh_file"][:-4]
+                stl_file = os.path.join(self.output_geometry_folder, mesh_name + ".stl")
 
-                # Transform a vtk file into an stl file and save it
-                if geom_file[-3:] == "vtp":
-                    self.vtk_reader.SetFileName(geom_file)
-                    self.stl_writer.SetFileName(self.output_folder + stl_file)
-                    self.stl_writer.Write()
+                # Add mesh to asset - and if it is not a duplicate, transform or copy it
+                if self.add_mesh_to_asset(mesh_name, stl_file, m):
+                    # Transform a vtk file into an stl file and save it
+                    if geom_file[-3:] == "vtp":
+                        self.vtk_reader.SetFileName(geom_file)
+                        self.stl_writer.SetFileName(os.path.join(self.output_folder, stl_file))
+                        self.stl_writer.Write()
 
-                # Just copy stl file
-                elif geom_file[-3:] == "stl":
-                    copyfile(geom_file, self.output_folder + stl_file)
+                    # Just copy stl file
+                    elif geom_file[-3:] == "stl":
+                        copyfile(geom_file, os.path.join(self.output_folder, stl_file))
 
-                else:
-                    raise NotImplementedError("Geom file is not vtk or stl!")
-
-                # Add mesh to asset
-                self.add_mesh_to_asset(mesh_name, stl_file, m)
+                    else:
+                        raise NotImplementedError("Geom file is not vtk or stl!")
 
                 # Create the geom
-                geom.append({"@name": mesh_name, "@type": "mesh", "@mesh": mesh_name})
+                # one mesh can be used for multiple geoms, but all geoms have to have different
+                # names
+                geom.append({"@name": '{}_{}'.format(body.name, mesh_name), "@type": "mesh",
+                            "@mesh": mesh_name})
 
         return geom
 
     def add_mesh_to_asset(self, mesh_name, mesh_file, mesh):
         if "mesh" not in self.asset:
             self.asset["mesh"] = []
-        self.asset["mesh"].append({"@name": mesh_name,
-                                   "@file": mesh_file,
-                                   "@scale": mesh["scale_factors"]})
+        # do not duplicate meshes
+        if mesh_name not in [v['@name'] for v in self.asset["mesh"]]:
+            self.asset["mesh"].append({"@name": mesh_name,
+                                       "@file": mesh_file,
+                                       "@scale": mesh["scale_factors"]})
+            return True
+        # means duplicate
+        return False
 
     def find_origin(self):
         # Start from a random joint and work your way backwards until you find
@@ -713,9 +761,9 @@ class Converter4:
     def fix_stl_files(self):
         print('Transforming and fixing STL files...')
         # Loop through geometry folder and fix stl files
-        for mesh_file in os.listdir(self.output_folder + self.output_geometry_folder):
+        for mesh_file in os.listdir(os.path.join(self.output_folder, self.output_geometry_folder)):
             if mesh_file.endswith(".stl"):
-                mesh_file = self.output_folder + self.output_geometry_folder + mesh_file
+                mesh_file = os.path.join(self.output_folder, self.output_geometry_folder, mesh_file)
                 stl = admesh.Stl(mesh_file)
                 stl.remove_unconnected_facets()
                 stl.write_binary(mesh_file)
@@ -784,7 +832,7 @@ class Joint:
             self.set_transformation_matrix(T)
 
         elif self.joint_type == "WeldJoint":
-            # TODO(AS) need to add fixed translations and rotations?
+            # TODO(AS)? need to add fixed translations and rotations?
             # Don't add anything to self.mujoco_joints, bodies are by default
             # attached rigidly to each other in MuJoCo
             pass
@@ -820,16 +868,18 @@ class Joint:
         # Start by parsing the CoordinateSet
         coordinate_set = self.parse_coordinate_set(joint)
 
-        # NOTE! Coordinates in CoordinateSet parameterize this joint. In theory all six DoFs could be dependent
-        # on one Coordinate. Here we assume that only one DoF is equivalent to a Coordinate, that is, there exists an
-        # identity mapping between a Coordinate and a DoF, which is different to OpenSim where there might be no
-        # identity mappings. In OpenSim a Coordinate is just a value and all DoFs might have some kind of mapping with
-        # it, see e.g. "flexion" Coordinate in MoBL_ARMS_module6_7_CMC.osim model. MuJoCo doesn't have such abstract
-        # notion of a "Coordinate", and thus there cannot be a non-identity mapping from a joint to itself
+        # NOTE! Coordinates in CoordinateSet parameterize this joint. In theory all six DoFs could
+        # be dependent on one Coordinate. Here we assume that only one DoF is equivalent to a
+        # Coordinate, that is, there exists an identity mapping between a Coordinate and a DoF,
+        # which is different to OpenSim where there might be no identity mappings. In OpenSim a
+        # Coordinate is just a value and all DoFs might have some kind of mapping with it, see e.g.
+        # "flexion" Coordinate in MoBL_ARMS_module6_7_CMC.osim model. MuJoCo doesn't have such
+        # abstract notion of a "Coordinate", and thus there cannot be a non-identity mapping from a
+        # joint to itself
 
-        # Go through axes; there's something wrong with the order of transformations, this is the order
-        # that works for leg6dof9musc.osim and MoBL_ARMS_module6_7_CMC.osim models, but it's so weird
-        # it's likely to be incorrect
+        # Go through axes; there's something wrong with the order of transformations, this is the
+        # order that works for leg6dof9musc.osim and MoBL_ARMS_module6_7_CMC.osim models, but it's
+        # so weird it's likely to be incorrect
         transforms = ["rotation1", "rotation2", "rotation3",
                       "translation1", "translation2", "translation3"]
         order = [5, 4, 3, 0, 1, 2]
@@ -930,7 +980,7 @@ class Joint:
                     raise NotImplementedError
 
                 # If the value is near zero don't bother creating this joint
-                if abs(value) < 1e-6:
+                if abs(value) < 10 * sys.float_info.epsilon:
                     continue
 
                 # Otherwise define a limited MuJoCo joint (we're not really creating this
@@ -988,8 +1038,7 @@ class Joint:
 
                 # Update name; since this is a dependent joint variable the independent joint
                 # variable might already have this name
-                if coord_params["name"] == coord_params["original_name"]:
-                    print('HEHRHE')
+                if coord_params["name"] == coord_params["original_name"] and False:  # FIX
                     coord_params["name"] = "{}_{}".format(coord_params["name"], t["@name"])
                 coord_params["limited"] = True
 
@@ -1011,9 +1060,7 @@ class Joint:
 
                 # Go through all joint equality constraints
                 for c in constraints["joint"]:
-                    if c["@joint1"] != t["coordinates"]:
-                        continue
-                    else:
+                    if c["@joint1"] == t["coordinates"]:
                         # constraint_found = True
 
                         # Check if this constraint is active
@@ -1042,18 +1089,21 @@ class Joint:
                 # strictly defined by knee angle, but it seems like they're affected by gravity as
                 # well (tibia drops to translation range limit value when leg6dof9musc is hanging
                 # from air) -> seems to work when solimp limits are very tight
-                # AS OpenSim 4: Does not create meaningful constraints
+
                 coord_params["add_to_mujoco_joints"] = True
 
+                # TODO fix by adding the original DOF, too?
+
                 # Add the equality constraint
-                if coord_params["add_to_mujoco_joints"]:
+                if coord_params["add_to_mujoco_joints"] and False:  # FIX
                     # We don't want to create a transform so set transform_value to zero
                     coord_params["transform_value"] = 0
                     self.equality_constraints["joint"].append({
                         "@name": coord_params["name"] + "_constraint",
-                        "@active": "true", "@joint1": coord_params["name"],
+                        "@active": "true",
+                        "@joint1": coord_params["name"],
                         "@joint2": independent_joint,
-                        "@polycoef": Utils.array_to_string(polycoef),
+                        "@polycoef": Utils.array_to_string(polycoef, abs_thr=EPSILON),
                         "@solimp": "0.9999 0.9999 0.001 0.5 2"})
 
             elif "LinearFunction" in t:
@@ -1173,16 +1223,17 @@ class Body:
 
         # Get meshes if there are VisibleObjects
         self.mesh = []
-        if "VisibleObject" in obj:
-            # Get scaling of VisibleObject
-            visible_object_scale = np.array(obj["VisibleObject"]["scale_factors"].split(),
-                                            dtype=float)
+        if "attached_geometry" in obj and obj['attached_geometry'] is not None:
+            # Get scaling of attached_geometry (might not exist in OpenSim4)
+            if 'scale_factors' in obj["attached_geometry"]:
+                visible_object_scale = np.array(obj["attached_geometry"]["scale_factors"].split(),
+                                                dtype=float)
+            else:
+                visible_object_scale = np.ones((3, ))
 
-            # There must be either "GeometrySet" or "geometry_files"
-            if ("GeometrySet" in obj["VisibleObject"] and
-                    obj["VisibleObject"]["GeometrySet"]["objects"] is not None):
+            if "Mesh" in obj["attached_geometry"]:
                 # Get mesh / list of meshes
-                geometry = obj["VisibleObject"]["GeometrySet"]["objects"]["DisplayGeometry"]
+                geometry = obj["attached_geometry"]["Mesh"]
 
                 if isinstance(geometry, dict):
                     geometry = [geometry]
@@ -1192,16 +1243,6 @@ class Body:
                     total_scale = visible_object_scale * display_geometry_scale
                     g["scale_factors"] = Utils.array_to_string(total_scale)
                     self.mesh.append(g)
-
-            elif "geometry_files" in obj["VisibleObject"] \
-                    and obj["VisibleObject"]["geometry_files"] is not None:
-
-                # Get all geometry files
-                files = obj["VisibleObject"]["geometry_files"].split()
-                for f in files:
-                    self.mesh.append(
-                        {"geometry_file": f,
-                         "scale_factors": Utils.array_to_string(visible_object_scale)})
 
             else:
                 print("No geometry files for body [{}]".format(self.name))
@@ -1324,7 +1365,7 @@ class Muscle:
                             "z_location", path_point)
 
                         # Save the new location and the path point
-                        path_point["location"] = Utils.array_to_string(location)
+                        path_point["location"] = Utils.array_to_string(location, abs_thr=EPSILON)
                         self.path_point_set[path_point["body"]].append(path_point)
 
                         self.sites.append({"@site": path_point["@name"]})

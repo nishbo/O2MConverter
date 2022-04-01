@@ -1,6 +1,12 @@
+#!python3
+"""OpenSim 4 to MuJoCo XML converter.
+
+O2MConverter
+Copyright 2020-2022 Aleksi Ikkala, Anton Sobinov
+https://github.com/aikkala/O2MConverter
+"""
 import os
 import sys
-import vtk
 import math
 import copy
 import warnings
@@ -8,6 +14,7 @@ from operator import itemgetter
 from collections import OrderedDict
 from shutil import copyfile
 
+import vtk
 from pyquaternion import Quaternion
 from natsort import natsorted, ns
 import xmltodict
@@ -16,7 +23,7 @@ from scipy.interpolate import interp1d
 from sklearn.metrics import r2_score
 # import admesh
 
-import Utils
+from . import Utils
 
 
 # less than this is zero

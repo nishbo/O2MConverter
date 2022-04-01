@@ -54,3 +54,6 @@ Easiest way to run the converter is to use conda to create the environment from 
 
 The optimized parameters are saved in *tests/[model_name]/output/data.pckl*, or in a file specified by the *EnvTemplate* object if you created & optimized a new model. Use function *load_data(args)* from *Utils.py* to load the optimized parameters, and function *set_parameters(args)* to set the models into a *mujoco_py.PyMjModel* model (see function *run_mujoco_simulations(args)* in *tests/process_test_runs.py* for an example). 
 
+## Authors
+- [**Aleksi Ikkala**](https://github.com/aikkala) - development and testing
+- [**Anton R Sobinov**](https://github.com/nishbo) - partial adaptation for OpenSim 4

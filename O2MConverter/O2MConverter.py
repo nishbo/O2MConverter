@@ -1,20 +1,32 @@
-import numpy as np
-import vtk
-import sys
+#!python3
+"""OpenSim < 4 to MuJoCo XML converter.
+
+O2MConverter
+Copyright 2020-2022 Aleksi Ikkala, Anton Sobinov
+https://github.com/aikkala/O2MConverter
+"""
 import os
-from scipy.interpolate import interp1d
+import sys
 import math
 import copy
-import xmltodict
-import admesh
-from pyquaternion import Quaternion
-from shutil import copyfile
-from natsort import natsorted, ns
+import warnings
 from operator import itemgetter
-from sklearn.metrics import r2_score
 from collections import OrderedDict
+from shutil import copyfile
 
-import Utils
+import vtk
+from pyquaternion import Quaternion
+from natsort import natsorted, ns
+import xmltodict
+import numpy as np
+from scipy.interpolate import interp1d
+from sklearn.metrics import r2_score
+try:
+    import admesh
+except ModuleNotFoundError as e:
+    warnings.warn('Could not import admesh. Not fixing STL files.')
+
+from . import Utils
 
 
 class Converter:

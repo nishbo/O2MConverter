@@ -78,7 +78,8 @@ class Converter4:
         # Note: balanceinertia is set to true, and boundmass and boundinertia are > 0 to ignore
         # poorly designed models (that contain incorrect inertial properties or massless moving
         # bodies)
-        self.model_mujoco_compiler = {
+        self.mujoco_dic = {}
+        self.mujoco_dic["compiler"] = {
             "@inertiafromgeom": "auto",
             "@angle": "radian",
             "@balanceinertia": "true",
@@ -86,7 +87,7 @@ class Converter4:
             "@boundinertia": "0.001",
             "lengthrange": {"@inttotal": "500"}
         }
-        self.model_mujoco_default = {
+        self.mujoco_dic["default"] = {
             "joint": {
                 "@limited": "true",
                 "@damping": "0.5",
@@ -99,39 +100,53 @@ class Converter4:
                 "@solref": ".02 1", "@solimp": ".8 .8 .01",
                 "@material": "geom"},
             "site": {"@size": "0.001"},
-            "tendon": {"@width": "0.001", "@rgba": ".95 .3 .3 1", "@limited": "false"}}
-        self.model_mujoco_default_default = [
-            {"@class": "muscle",
-             "muscle": {"@ctrllimited": "true", "@ctrlrange": "0 1", "@scale": "400"}},
-            {"@class": "motor",
-             "motor": {"@gear": "20"}}
-        ]
-        self.model_mujoco_option = {"@timestep": "0.002", "flag": {"@energy": "enable"}}
-        self.model_mujoco_size = {"@njmax": "1000", "@nconmax": "400", "@nuser_jnt": 1}
-        self.model_mujoco_visual = {
+            "tendon": {"@width": "0.001", "@rgba": ".95 .3 .3 1", "@limited": "false"},
+            "default": [
+                {"@class": "muscle",
+                 "muscle": {"@ctrllimited": "true", "@ctrlrange": "0 1", "@scale": "400"}},
+                {"@class": "motor",
+                 "motor": {"@gear": "20"}}
+            ]
+        }
+        self.mujoco_dic["option"] = {"@timestep": "0.002", "flag": {"@energy": "enable"}}
+        self.mujoco_dic["size"] = {"@njmax": "1000", "@nconmax": "400", "@nuser_jnt": 1}
+        self.mujoco_dic["visual"] = {
             "map": {"@fogstart": "3", "@fogend": "5", "@force": "0.1"},
-            "quality": {"@shadowsize": "2048"}}
+            "quality": {"@shadowsize": "2048"}
+        }
 
         # Start building the worldbody
-        self.model_mujoco_worldbody = {"geom": {
-            "@name": "floor", "@pos": "0 0 0", "@size": "10 10 0.125",
-            "@type": "plane", "@material": "MatPlane", "@condim": "3"}}
-        self.model_mujoco_worldbody_body = {
-            "light": {"@mode": "trackcom", "@directional": "false", "@diffuse": ".8 .8 .8",
-                      "@specular": "0.3 0.3 0.3", "@pos": "0 0 4.0", "@dir": "0 0 -1"}}
+        self.mujoco_dic["worldbody"] = {
+            "geom": {
+                "@name": "floor",
+                "@type": "plane",
+                "@pos": "0 0 0", "@size": "10 10 0.125",
+                "@material": "MatPlane",
+                "@condim": "3"
+            },
+            'body': {
+                "light": {
+                    "@mode": "trackcom", "@directional": "false", "@diffuse": ".8 .8 .8",
+                    "@specular": "0.3 0.3 0.3", "@pos": "0 0 4.0", "@dir": "0 0 -1"
+                }
+            }
+        }
 
         # Set some asset defaults
-        self.model_mujoco_asset_texture = [
+        self.mujoco_dic["asset"] = {}
+        self.mujoco_dic["asset"]["texture"] = [
             {"@name": "texplane", "@type": "2d", "@builtin": "checker", "@rgb1": ".2 .3 .4",
              "@rgb2": ".1 0.15 0.2", "@width": "100", "@height": "100"},
             {"@name": "texgeom", "@type": "cube", "@builtin": "flat", "@mark": "cross",
              "@width": "127", "@height": "1278", "@rgb1": "0.8 0.6 0.4", "@rgb2": "0.8 0.6 0.4",
-             "@markrgb": "1 1 1", "@random": "0.01"}]
-
-        self.model_mujoco_asset_material = [
+             "@markrgb": "1 1 1", "@random": "0.01"}
+        ]
+        self.mujoco_dic["asset"]["material"] = [
             {"@name": "MatPlane", "@reflectance": "0.5", "@texture": "texplane",
              "@texrepeat": "1 1", "@texuniform": "true"},
-            {"@name": "geom", "@texture": "texgeom", "@texuniform": "true"}]
+            {"@name": "geom", "@texture": "texgeom", "@texuniform": "true"}
+        ]
+
 
     def convert(self, input_xml, output_folder, geometry_folder=None, for_testing=False):
         """Convert given OpenSim XML model to MuJoCo XML model"""
@@ -468,18 +483,10 @@ class Converter4:
         print('Building MuJoCo model...')
 
         # Initialize model
-        model = {"mujoco": {"@model": model_name}}
-
-        # Set defaults
-        model["mujoco"]["compiler"] = self.model_mujoco_compiler
-        model["mujoco"]["default"] = self.model_mujoco_default
-        model["mujoco"]["default"]["default"] = self.model_mujoco_default_default
-        model["mujoco"]["option"] = self.model_mujoco_option
-        model["mujoco"]["size"] = self.model_mujoco_size
-        model["mujoco"]["visual"] = self.model_mujoco_visual
-
-        # Start building the worldbody
-        worldbody = self.model_mujoco_worldbody
+        model = {
+            "mujoco": copy.deepcopy(self.mujoco_dic),
+        }
+        model["mujoco"]["@model"] = model_name
 
         # We should probably find the "origin" body, where the kinematic chain begins
         self.origin_body, self.origin_joint = self.find_origin()
@@ -493,17 +500,12 @@ class Converter4:
         self.origin_joint.set_transformation_matrix(np.matmul(T_rotation, T_origin_joint))
 
         # Add sites to worldbody / "ground" in OpenSim
-        worldbody["site"] = self.bodies[self.origin_joint.parent_body].sites
-
-        # Add some more defaults
-        worldbody["body"] = self.model_mujoco_worldbody_body
+        model["mujoco"]["worldbody"]["site"] = self.bodies[self.origin_joint.parent_body].sites
 
         # Build the kinematic chains
-        worldbody["body"] = self.add_body(
-            worldbody["body"], self.origin_body, self.joints[self.origin_body.name])
-
-        # Add worldbody to the model
-        model["mujoco"]["worldbody"] = worldbody
+        model["mujoco"]["worldbody"]["body"] = self.add_body(
+            model["mujoco"]["worldbody"]["body"], self.origin_body,
+            self.joints[self.origin_body.name])
 
         # We might want to use a weld constraint to fix the origin body to worldbody for experiments
         self.equality["weld"].append({
@@ -511,12 +513,8 @@ class Converter4:
             "@body1": self.origin_body.name,
             "@active": "false"})
 
-        # Set some asset defaults
-        self.asset["texture"] = self.model_mujoco_asset_texture
-        self.asset["material"] = self.model_mujoco_asset_material
-
         # Add assets to model
-        model["mujoco"]["asset"] = self.asset
+        model["mujoco"]["asset"].update(self.asset)
 
         # Add tendons and actuators
         model["mujoco"]["tendon"] = {"spatial": self.tendon}

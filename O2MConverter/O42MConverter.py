@@ -46,6 +46,9 @@ class Converter4:
         self.vtk_reader = vtk.vtkXMLPolyDataReader()
         self.stl_writer = vtk.vtkSTLWriter()
 
+        # this can be used to replace meshes in OpenSim model
+        self.mesh_dic = {}
+
         # Setup writer
         self.stl_writer.SetInputConnection(self.vtk_reader.GetOutputPort())
         self.stl_writer.SetFileTypeToBinary()
@@ -59,8 +62,8 @@ class Converter4:
         self.joints = dict()
         self.muscles = []
 
-        # We need to keep track of coordinates in joints' CoordinateSet, we might need to use them for setting up
-        # equality constraints
+        # We need to keep track of coordinates in joints' CoordinateSet, we might need to use them
+        # for setting up equality constraints
         self.coordinates = dict()
 
         # These dictionaries (or list of dicts) are in MuJoCo style (when converted to XML)
@@ -149,7 +152,11 @@ class Converter4:
 
 
     def convert(self, input_xml, output_folder, geometry_folder=None, for_testing=False):
-        """Convert given OpenSim XML model to MuJoCo XML model"""
+        """Convert given OpenSim XML model to MuJoCo XML model
+
+        Differently from O2MConverter, does not create a nested directory and does not extend the
+        model name.
+        """
         if for_testing:
             warnings.warn('for_testing flag has not been tested for OpenSim4 models.')
 
@@ -167,9 +174,9 @@ class Converter4:
             text = f.read()
         p = xmltodict.parse(text)
 
-        # Set output folder
-        model_name = os.path.split(input_xml)[1][:-5] + "_converted"
-        self.output_folder = os.path.join(output_folder, model_name)
+        # Set output folder  AS: different from O2MConverter
+        model_name = os.path.split(input_xml)[1][:-5]
+        self.output_folder = output_folder
 
         # Create the output folder
         os.makedirs(self.output_folder, exist_ok=True)

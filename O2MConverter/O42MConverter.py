@@ -945,29 +945,67 @@ class Joint:
                     # Also, it needs to have a condition for Constant for the O2MConverter so it
                     # does not just break?
 
-                    # # Check if we need to modify limits, TODO not sure if this is correct or needed
-                    # if Utils.is_nested_field(t, "SimmSpline", ["function"]):
+                    # Check if we need to modify limits, TODO not sure if this is correct or needed
+                    if Utils.is_nested_field(t, "SimmSpline", ["function"]):
+                        warnings.warn(
+                            'DOF {} is defined as a spline. In OpenSim, for input and output it'
+                            ' will be using radians, as opposed to all other rotational DOFs that'
+                            ' will use degrees, needlessly complicating the pipeline. Consider'
+                            ' changing this DOF to a linear one, otherwise who knows what will'
+                            ' happen.'.format(t["@name"]))
 
-                    #     # Fit a line/spline and check limit values within that fit
-                    #     x_values = np.array(t["function"]["SimmSpline"]["x"].split(), dtype=float)
-                    #     y_values = np.array(t["function"]["SimmSpline"]["y"].split(), dtype=float)
-                    #     assert len(x_values) > 1 and len(y_values) > 1, "Not enough points, can't fit a polynomial"
-                    #     fit = np.polynomial.polynomial.Polynomial.fit(x_values, y_values, min(4, len(x_values) - 1))
-                    #     y_fit = fit(x_values)
-                    #     assert r2_score(y_values, y_fit) > 0.5, "A bad approximation of the SimmSpline"
+                        # Fit a line/spline and check limit values within that fit
+                        x_values = np.array(t["function"]["SimmSpline"]["x"].split(), dtype=float)
+                        y_values = np.array(t["function"]["SimmSpline"]["y"].split(), dtype=float)
+                        assert len(x_values) > 1 and len(y_values) > 1, "Not enough points, can't fit a polynomial"
+                        fit = np.polynomial.polynomial.Polynomial.fit(x_values, y_values, min(4, len(x_values) - 1))
+                        y_fit = fit(x_values)
+                        assert r2_score(y_values, y_fit) > 0.5, "A bad approximation of the SimmSpline"
 
-                    #     # Update range as min/max of the approximated range
-                    #     coord_params["range"] = np.array([min(y_fit), max(y_fit)])
+                        # Update range as min/max of the approximated range
+                        coord_params["range"] = np.array([min(y_fit), max(y_fit)])
 
-                    #     # Make this into an identity mapping
-                    #     t["function"] = dict({"LinearFunction": {"coefficients": '1 0'}})
+                        # Make this into an identity mapping
+                        t["function"] = dict({"LinearFunction": {"coefficients": '1 0'}})
 
-                    # elif Utils.is_nested_field(t, "LinearFunction", ["function"]):
-                    #     coefficients = np.array(t["function"]["LinearFunction"]["coefficients"].split(), dtype=float)
-                    #     assert abs(coefficients[0]) == 1 and coefficients[1] == 0, "Should we modify limits?"
+                    elif Utils.is_nested_field(t, "SimmSpline", []):
+                        warnings.warn(
+                            'DOF {} is defined as a spline. In OpenSim, for input and output it'
+                            ' will be using radians, as opposed to all other rotational DOFs that'
+                            ' will use degrees, needlessly complicating the pipeline. Consider'
+                            ' changing this DOF to a linear one, otherwise who knows what will'
+                            ' happen.'.format(t["@name"]))
 
-                    # else:
-                    #     raise NotImplementedError
+                        # Fit a line/spline and check limit values within that fit
+                        x_values = np.array(t["SimmSpline"]["x"].split(), dtype=float)
+                        y_values = np.array(t["SimmSpline"]["y"].split(), dtype=float)
+                        assert len(x_values) > 1 and len(y_values) > 1, "Not enough points, can't fit a polynomial"
+                        fit = np.polynomial.polynomial.Polynomial.fit(x_values, y_values, min(4, len(x_values) - 1))
+                        y_fit = fit(x_values)
+                        assert r2_score(y_values, y_fit) > 0.5, "A bad approximation of the SimmSpline"
+
+                        # Update range as min/max of the approximated range
+                        coord_params["range"] = np.array([min(y_fit), max(y_fit)])
+
+                        # Make this into an identity mapping
+                        t["function"] = dict({"LinearFunction": {"coefficients": '1 0'}})
+
+                    elif Utils.is_nested_field(t, "LinearFunction", ["function"]):
+                        coefficients = np.array(t["function"]["LinearFunction"]["coefficients"].split(), dtype=float)
+                        assert abs(coefficients[0]) == 1 and coefficients[1] == 0, "Should we modify limits?"
+
+                    elif Utils.is_nested_field(t, "LinearFunction", []):
+                        coefficients = np.array(t["LinearFunction"]["coefficients"].split(), dtype=float)
+                        assert abs(coefficients[0]) == 1 and coefficients[1] == 0, "Should we modify limits?"
+
+                    elif (Utils.is_nested_field(t, "Constant", []) or
+                          Utils.is_nested_field(t, "Constant", ['function', 'MultiplierFunction'])):
+                        # unused DOFs on all joints
+                        pass
+
+                    else:
+                        print(t)
+                        raise NotImplementedError
 
                     # Mark this dof as designated
                     dof_designated.append(coord_params["name"])

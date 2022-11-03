@@ -2,7 +2,8 @@
 """OpenSim 4 to MuJoCo XML converter.
 
 O2MConverter
-Copyright 2020-2022 Aleksi Ikkala, Anton Sobinov
+Copyright 2020-2022 Aleksi Ikkala
+Modified Anton Sobinov
 https://github.com/aikkala/O2MConverter
 """
 import os
@@ -1005,7 +1006,7 @@ class Joint:
 
                     else:
                         print(t)
-                        raise NotImplementedError
+                        # raise NotImplementedError
 
                     # Mark this dof as designated
                     dof_designated.append(coord_params["name"])

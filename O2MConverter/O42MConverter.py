@@ -34,6 +34,7 @@ EPSILON = 10 * sys.float_info.epsilon
 class Converter4:
     """A class to convert OpenSim 4.0 XML model files to MuJoCo XML model files"""
     def __init__(self):
+        print('DEVELOPPPPMENT!')
         # Define input XML and output folder
         self.input_xml = None
         self.output_folder = None
@@ -567,6 +568,12 @@ class Converter4:
                         mujoco_joint["limited"] = False
 
     def add_body(self, worldbody, current_body, current_joints):
+        print('\t\t', current_body.name)
+        print('\t\t', current_body.inertia[()].__class__)
+        current_body.inertia = np.fromstring(current_body.inertia[()], count=6)
+        print('\t\t', current_body.inertia)
+        print('\t\t', current_body.inertia[0])
+        print('\t\t', current_body.inertia.__class__, current_body.inertia.shape)
         # Create a new MuJoCo body
         worldbody["@name"] = current_body.name
 

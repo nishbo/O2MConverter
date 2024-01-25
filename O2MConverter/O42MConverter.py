@@ -34,7 +34,6 @@ EPSILON = 10 * sys.float_info.epsilon
 class Converter4:
     """A class to convert OpenSim 4.0 XML model files to MuJoCo XML model files"""
     def __init__(self):
-        print('DEVELOPPPPMENT!')
         # Define input XML and output folder
         self.input_xml = None
         self.output_folder = None

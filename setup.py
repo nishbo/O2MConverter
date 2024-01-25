@@ -22,7 +22,7 @@ setup(
         'xmltodict',
         'numpy',
         'scipy',
-        'sklearn',
+        'scikit-learn',
         'pandas'],
     author='Aleksi Ikkala, Anton R Sobinov',
     author_email='aleksi.ikkala@gmail.com',

@@ -1266,7 +1266,7 @@ class Body:
         self.mass = float(obj["mass"])
         self.mass_center = np.array(obj["mass_center"].split(), dtype=float)
         if 'inertia' in obj.keys():
-            self.inertia = np.array(obj['inertia'])
+            self.inertia = np.fromstring(obj['inertia'], dtype=float, sep=' ')
         else:
             self.inertia = np.array([obj[x] for x in
                                     ["inertia_xx", "inertia_yy", "inertia_zz",

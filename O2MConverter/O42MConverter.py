@@ -568,12 +568,6 @@ class Converter4:
                         mujoco_joint["limited"] = False
 
     def add_body(self, worldbody, current_body, current_joints):
-        print('\t\t', current_body.name)
-        print('\t\t', current_body.inertia[()].__class__)
-        current_body.inertia = np.fromstring(current_body.inertia[()], count=6)
-        print('\t\t', current_body.inertia)
-        print('\t\t', current_body.inertia[0])
-        print('\t\t', current_body.inertia.__class__, current_body.inertia.shape)
         # Create a new MuJoCo body
         worldbody["@name"] = current_body.name
 
@@ -1273,7 +1267,7 @@ class Body:
         self.mass = float(obj["mass"])
         self.mass_center = np.array(obj["mass_center"].split(), dtype=float)
         if 'inertia' in obj.keys():
-            self.inertia = np.array(obj['inertia'])
+            self.inertia = np.fromstring(obj['inertia'], dtype=float, sep=' ')
         else:
             self.inertia = np.array([obj[x] for x in
                                     ["inertia_xx", "inertia_yy", "inertia_zz",

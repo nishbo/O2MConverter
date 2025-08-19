@@ -602,6 +602,11 @@ class Converter4:
                     "@pos": Utils.array_to_string(current_body.mass_center),
                     "@mass": str(current_body.mass),
                     "@fullinertia": Utils.array_to_string(current_body.inertia)}
+            elif np.all(np.array(current_body.inertia) == 0):
+                # ARS: if the inertia was unset, ignore it, only save mass and mass center
+                worldbody["inertial"] = {
+                    "@pos": Utils.array_to_string(current_body.mass_center),
+                    "@mass": str(current_body.mass)}
 
         # Add sites
         worldbody["site"] = current_body.sites
